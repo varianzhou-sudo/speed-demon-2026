@@ -1,0 +1,12 @@
+# Track A · Ingest
+
+The implementation reads the log once, grouping requests by the first 13 timestamp bytes (the UTC hour) and the exact endpoint. It keeps each group's latency values and its count of HTTP 5xx responses. Ordered maps put the groups in output order. Sorting the latencies within a group gives exact nearest-rank percentiles, including when a latency or an entire input row is duplicated. Error rates are computed as integer parts per million.
+
+Build locally with a C++17 compiler and its standard library. There are no third-party runtime dependencies.
+
+```sh
+g++ -std=c++17 -O2 track-a/ingest.cpp -o /tmp/ingest
+/tmp/ingest /path/to/data/requests.log /tmp/summary.txt
+```
+
+The Docker entry point reads `/data/requests.log` and writes `/out/summary.txt`. Given another 24 hours, profile endpoint lookups and compare the current ordered maps with endpoint interning followed by a single output-order sort on the organizers' machine.
