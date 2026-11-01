@@ -17,4 +17,16 @@ Both public seed-1 input files matched the organizers' published hashes at each 
 | Public full seed 1 | `d8088b1cd42ba1338b1345b107b55db7b96ef1f5066f3ff64fd26a8912a0f536` |
 | Tiny seed 19, byte-identical to the reference | `6e4118916628e4b69adcb8a01b2539f5ca05632b310564d9b4cf2c1c7387a9e8` |
 
-A separate boundary fixture matched the reference for embedded Unicode and BOM bytes, an escaped quote adjacent to a line feed, an empty name in quoted and unquoted form, and an unterminated final row. The official Dockerfile policy checker passed. The container and official judging machine have not been run. Board run IDs are pending.
+A separate boundary fixture matched the reference for embedded Unicode and BOM bytes, an escaped quote adjacent to a line feed, an empty name in quoted and unquoted form, and an unterminated final row. The official Dockerfile policy checker passed. The official container subsequently passed the public run below.
+
+## First public hardware run
+
+The [organizer’s practice board](https://speeddemon.dev/board/) scored commit `db8facdafaa0d3f4e570b75b835286da2fdad2ad` on the full public seed-1 input. Run `run-3fed99b2e442` passed the build, correctness, timeout, and sandbox gates.
+
+| Wall time (s) | Peak memory (bytes) | Efficiency coefficient | Practice points |
+| ---: | ---: | ---: | ---: |
+| 1.185705 | 17457152 | 5.879511 | 38.467061 |
+
+## First optimization pass
+
+Read the CSV in blocks and carry incomplete records into the next block. Find field delimiters and escaped quotes in place. Intern names in a shared byte pool with exact comparisons on hash collisions. This preserves distinct-name counts across blocks and avoids allocating strings for every row. The candidate matched the full public output hash and the official Python oracle on three additional tiny datasets (seeds 47, 103 and 327).

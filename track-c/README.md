@@ -1,5 +1,7 @@
 # Track C · Join
 
+Read the CSV in blocks and carry incomplete records into the next block. Find field delimiters and escaped quotes in place. Intern names in a shared byte pool with exact comparisons on hash collisions. This preserves distinct-name counts across blocks and avoids allocating strings for every row.
+
 This program joins records to countries by region ID and writes one aggregate row for each country with at least one record. A dense table maps the bounded region IDs to country indices. Missing IDs map to the unmatched group. A single-pass CSV decoder consumes one record at a time, preserves commas, embedded newlines and escaped quotes in text, skips byte-order marks only at record boundaries, and sums money in integer cents.
 
 A distinct name receives one integer ID across the file. Each country stores a bitset indexed by name ID, so a popular name costs one bit per country after its string has been interned. Notes are counted as decoded bytes without being stored. Countries are emitted in bytewise order.

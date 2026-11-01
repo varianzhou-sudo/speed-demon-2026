@@ -8,7 +8,7 @@ Team `Super-Tangram!!` is preparing entries for three tracks of the [Speed Demon
 | B | Answer Boolean and phrase queries on a document collection | [Index](track-b/) |
 | C | Stream CSV transactions, join region metadata and compute country aggregates | [Join](track-c/) |
 
-Each track contains the source, a Dockerfile, and local benchmark notes in `PERF.md`. All three native programs matched the organizers' published full seed-1 output hashes. Official leaderboard and hidden-data results are pending.
+Each track contains the source, a Dockerfile, and local benchmark notes in `PERF.md`. All three native programs matched the organizers' published full seed-1 output hashes. All three entries have also passed the organizer’s public practice machine. The track performance logs record the run IDs. Hidden-data results are pending.
 
 ## Reproduce
 

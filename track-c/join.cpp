@@ -2,6 +2,9 @@
 #include <charconv>
 #include <cstdint>
 #include <cstdio>
+#include <cstring>
+#include <string_view>
+#include <array>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -15,62 +18,100 @@
 namespace fs = std::filesystem;
 using i64 = std::int64_t;
 
-class Csv {
-    FILE* file;
-    int ch;
-    void next() { ch = getc_unlocked(file); }
-public:
-    explicit Csv(const fs::path& path) : file(std::fopen(path.c_str(), "rb")) {
-        if (!file) throw std::runtime_error("cannot open records.csv");
-        next();
-    }
-    ~Csv() { std::fclose(file); }
-    bool done() const { return ch == EOF; }
-    void take(int expected) {
-        if (ch != expected) throw std::runtime_error("unexpected CSV delimiter");
-        next();
-    }
-    void bom() {
-        if (ch == 0xef) { next(); take(0xbb); take(0xbf); }
-    }
-    void end_record() {
-        if (ch == '\r') next();
-        if (!done()) take('\n');
-        if (std::ferror(file)) throw std::runtime_error("records.csv read failed");
-    }
-    i64 number() {
-        if (ch < '0' || ch > '9') throw std::runtime_error("missing number");
-        i64 value = 0;
-        do { value = value * 10 + ch - '0'; next(); } while (ch >= '0' && ch <= '9');
-        return value;
-    }
-    i64 cents() {
-        bool negative = ch == '-';
-        if (negative) next();
-        i64 whole = number();
-        take('.');
-        i64 fraction = number();
-        return (negative ? -1 : 1) * (100 * whole + fraction);
-    }
-    // The note's value is never materialized. Quoted newlines and escaped
-    // quotes pass through exactly the same decoder as the distinct-name key.
-    std::size_t text(std::string* value) {
-        bool quoted = ch == '"';
-        if (quoted) next();
-        std::size_t size = 0;
-        while (!done()) {
-            if (quoted && ch == '"') {
-                next();
-                if (ch != '"') break;
-            } else if (!quoted && ch == ',') {
-                break;
-            }
-            if (value) value->push_back(static_cast<char>(ch));
-            ++size;
-            next();
+struct Text {
+    std::string_view encoded;
+    std::size_t size;
+};
+
+// Outer quotes are omitted, but doubled quotes stay in the view. This encoding
+// is canonical for a decoded name (an unquoted CSV field cannot contain quotes).
+bool read_text(const char*& p, const char* end, Text& field) {
+    bool quoted = *p == '"';
+    if (quoted) ++p;
+    const char* begin = p;
+    std::size_t escaped = 0;
+    for (;;) {
+        const char* stop = static_cast<const char*>(std::memchr(p, quoted ? '"' : ',', end - p));
+        if (!stop) return false;
+        p = stop + 1;
+        if (quoted && *p == '"') {
+            ++escaped;
+            ++p;
+            continue;
         }
-        take(',');
-        return size;
+        field.encoded = {begin, static_cast<std::size_t>(stop - begin)};
+        field.size = field.encoded.size() - escaped;
+        return !quoted || *p++ == ',';
+    }
+}
+
+bool number(const char*& p, const char* end, char delimiter, i64& n) {
+    const auto result = std::from_chars(p, end, n);
+    p = result.ptr;
+    if (result.ec != std::errc{} || *p != delimiter) return false;
+    ++p;
+    return true;
+}
+
+struct Row {
+    i64 id, region, amount;
+    Text name, note;
+};
+
+bool read_row(const char*& p, const char* end, bool final, Row& row) {
+    if (std::memcmp(p, "\xef\xbb\xbf", 3) == 0) p += 3;
+    if (!number(p, end, ',', row.id) || !read_text(p, end, row.name) ||
+        !read_text(p, end, row.note) || !number(p, end, ',', row.region)) return false;
+    bool negative = *p == '-';
+    if (negative) ++p;
+    i64 whole;
+    if (!number(p, end, '.', whole) || end - p < 2 || p[0] < '0' || p[0] > '9' || p[1] < '0' || p[1] > '9')
+        return false;
+    row.amount = (negative ? -1 : 1) * (100 * whole + (p[0] - '0') * 10 + (p[1] - '0'));
+    p += 2;
+    if (*p == '\r') ++p;
+    if (p == end) return final;
+    return *p++ == '\n';
+}
+
+// Slots point into a compact byte pool. Hash collisions are resolved by
+// comparing complete names, including trailing spaces and escaped quotes.
+class Names {
+    struct Slot { std::uint32_t id = 0, hash = 0; };
+    struct Entry { std::uint32_t offset, length; };
+    std::vector<Slot> slots{1024};
+    std::vector<Entry> entries{{0, 0}};
+    std::string bytes;
+    std::size_t probe(std::uint32_t hash, std::string_view name) const {
+        std::size_t i = hash & (slots.size() - 1);
+        while (slots[i].id) {
+            auto ref = entries[slots[i].id];
+            if (slots[i].hash == hash && name.size() == ref.length &&
+                !std::memcmp(bytes.data() + ref.offset, name.data(), ref.length)) break;
+            i = (i + 1) & (slots.size() - 1);
+        }
+        return i;
+    }
+    void grow() {
+        auto previous = std::move(slots);
+        slots.resize(previous.size() * 2);
+        for (auto slot : previous) if (slot.id) {
+            auto i = slot.hash & (slots.size() - 1);
+            while (slots[i].id) i = (i + 1) & (slots.size() - 1);
+            slots[i] = slot;
+        }
+    }
+public:
+    std::size_t intern(std::string_view name) {
+        auto hash = static_cast<std::uint32_t>(std::hash<std::string_view>{}(name));
+        auto i = probe(hash, name);
+        if (slots[i].id) return slots[i].id;
+        if (entries.size() * 10 > slots.size() * 7) { grow(); i = probe(hash, name); }
+        auto id = static_cast<std::uint32_t>(entries.size());
+        entries.push_back({static_cast<std::uint32_t>(bytes.size()), static_cast<std::uint32_t>(name.size())});
+        bytes.append(name);
+        slots[i] = {id, hash};
+        return id;
     }
 };
 
@@ -101,7 +142,7 @@ void join(const fs::path& data, const fs::path& out) {
     std::string row;
     if (!std::getline(lookup, row) || row != "region_id,country") throw std::runtime_error("invalid regions header");
     std::map<std::string, std::size_t> countries{{"_UNMATCHED", 0}};
-    std::vector<unsigned> regions;
+    std::vector<std::uint16_t> regions;
     while (std::getline(lookup, row)) {
         std::size_t id = 0;
         auto [pos, ec] = std::from_chars(row.data(), row.data() + row.size(), id);
@@ -111,23 +152,40 @@ void join(const fs::path& data, const fs::path& out) {
         regions[id] = country;
     }
     std::vector<Totals> groups(countries.size());
-    std::unordered_map<std::string, std::size_t> name_ids;
-    Csv csv(data / "records.csv");
-    csv.bom();
-    for (auto c : std::string("id,name,note,region_id,amount")) csv.take(c);
-    csv.end_record();
-    std::string name;
-    while (!csv.done()) {
-        csv.bom();
-        i64 id = csv.number(); csv.take(',');
-        name.clear();
-        auto name_bytes = csv.text(&name);
-        auto note_bytes = csv.text(nullptr);
-        auto region = static_cast<std::size_t>(csv.number()); csv.take(',');
-        i64 amount = csv.cents();
-        csv.end_record();
-        auto name_id = name_ids.try_emplace(name, name_ids.size()).first->second;
-        groups[region < regions.size() ? regions[region] : 0].add(id, amount, name_id, name_bytes, note_bytes);
+    Names names;
+    std::ifstream input(data / "records.csv", std::ios::binary);
+    if (!std::getline(input, row)) throw std::runtime_error("missing records header");
+    if (row.compare(0, 3, "\xef\xbb\xbf") == 0) row.erase(0, 3);
+    if (!row.empty() && row.back() == '\r') row.pop_back();
+    if (row != "id,name,note,region_id,amount") throw std::runtime_error("invalid records header");
+
+    // A sentinel and two padding bytes make the EOF, BOM and quote lookahead
+    // safe. Carry an incomplete row to the next block, growing for long fields.
+    std::vector<char> buffer(256 * 1024 + 3);
+    std::size_t tail = 0;
+    for (;;) {
+        input.read(buffer.data() + tail, buffer.size() - 3 - tail);
+        if (input.bad()) throw std::runtime_error("records.csv read failed");
+        const bool final = input.eof();
+        const std::size_t size = tail + input.gcount();
+        std::memset(buffer.data() + size, 0, 3);
+        const char* p = buffer.data();
+        const char* end = p + size;
+        Row record;
+        while (p != end) {
+            const char* begin = p;
+            if (!read_row(p, end, final, record)) { p = begin; break; }
+            auto name_id = names.intern(record.name.encoded);
+            auto region = static_cast<std::size_t>(record.region);
+            groups[region < regions.size() ? regions[region] : 0].add(record.id, record.amount, name_id, record.name.size, record.note.size);
+        }
+        tail = end - p;
+        if (final) {
+            if (tail) throw std::runtime_error("invalid CSV row");
+            break;
+        }
+        std::memmove(buffer.data(), p, tail);
+        if (tail == buffer.size() - 3) buffer.resize(2 * tail + 3);
     }
     fs::create_directories(out);
     std::ofstream output(out / "aggregates.txt", std::ios::binary);
