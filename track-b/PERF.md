@@ -26,3 +26,5 @@ The [organizer’s practice board](https://speeddemon.dev/board/) scored commit 
 ## First optimization pass
 
 Read the queries first, then index bounded groups of complete document lines in parallel. A query vocabulary limits the postings built for each shard. Each worker retains a bounded result summary per query. Merging these summaries in document order preserves the counts, ID sums and first hits without materializing a global result list. The candidate matched the full public output hash and the official Python oracle on three additional tiny datasets (seeds 47, 103 and 327).
+
+Run `run-2d84dcab2c38` on the organizer's full public input scored `6fd666fe2789` at **54.875751 practice points**. All gates passed. Wall time was 0.716473 s, peak memory 156,254,208 bytes, and the efficiency coefficient was 12.517426.

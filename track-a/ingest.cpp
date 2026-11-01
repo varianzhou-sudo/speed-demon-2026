@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
+#include <deque>
 #include <fcntl.h>
 #include <map>
 #include <numeric>
@@ -21,8 +22,51 @@ struct Bucket {
     std::vector<uint32_t> latencies;
     uint64_t errors = 0;
 };
+class Paths {
+    struct Slot { View key; size_t id; uint64_t hash; };
+    std::vector<Slot> slots_ = std::vector<Slot>(64);
+    std::deque<std::string> names_;
+    static uint64_t hash(View key) {
+        // Sample the beginning, middle and end. Equality always checks the entire key.
+        uint64_t bits = key.size();
+        if (key.size() >= 4) {
+            for (size_t off : {size_t(0),(key.size()-4)/2,key.size()-4}) {
+                uint32_t part;
+                std::memcpy(&part, key.data()+off, sizeof(part));
+                bits = (bits ^ part) * 0x9e3779b97f4a7c15ULL;
+            }
+        } else {
+            for (unsigned char ch : key) bits = bits*131 + ch;
+        }
+        return bits ^ (bits >> 33);
+    }
+    Slot& lookup(View name, uint64_t h) {
+        const size_t mask = slots_.size()-1;
+        size_t pos = h & mask;
+        while (!slots_[pos].key.empty() && (slots_[pos].hash != h || slots_[pos].key != name))
+            pos = (pos+1) & mask;
+        return slots_[pos];
+    }
+public:
+    size_t intern(View name) {
+        const uint64_t h = hash(name);
+        auto& slot = lookup(name,h);
+        if (!slot.key.empty()) return slot.id;
+        size_t id = names_.size();
+        names_.emplace_back(name);
+        slot = {names_.back(),id,h};
+        if (names_.size()*2 > slots_.size()) {
+            auto old = std::move(slots_);
+            slots_.resize(2*old.size());
+            for (auto& entry : old)
+                if (!entry.key.empty()) lookup(entry.key,entry.hash) = entry;
+        }
+        return id;
+    }
+    const auto& names() const { return names_; }
+};
 struct Shard {
-    std::unordered_map<View, size_t> endpoints;
+    Paths endpoints;
     std::map<View, std::vector<Bucket>> by_hour;
 };
 
@@ -45,10 +89,7 @@ void scan(Shard& shard, const char* bytes, size_t begin, size_t end, size_t size
         while (*path++ != ' ') {}
         const char* separator = static_cast<const char*>(std::memchr(path, ' ', eof - path));
         View endpoint(path, static_cast<size_t>(separator - path));
-        auto found = shard.endpoints.find(endpoint);
-        if (found == shard.endpoints.end())
-            found = shard.endpoints.emplace(endpoint, shard.endpoints.size()).first;
-        const size_t id = found->second;
+        const size_t id = shard.endpoints.intern(endpoint);
         if (hour_groups->size() <= id) hour_groups->resize(id + 1);
         Bucket& group = (*hour_groups)[id];
         group.errors += separator[1] == '5';
@@ -93,7 +134,15 @@ std::string render_hour(View hour, const Hour& groups, const std::vector<View>& 
         if (!first) continue;
         auto& values = merged.empty() ? first->latencies : merged;
         const size_t n = values.size();
-        std::sort(values.begin(), values.end());
+        if (n < 128) std::sort(values.begin(), values.end());
+        else {
+            auto begin = values.begin();
+            for (size_t p : {50, 95, 99}) {
+                auto rank = values.begin() + (p*n-1)/100;
+                std::nth_element(begin, rank, values.end());
+                begin = rank+1;
+            }
+        }
         out.append(hour);
         out += ":00:00Z ";
         out += names[e];
@@ -133,7 +182,7 @@ int main(int argc, char** argv) {
     std::map<View, Hour> hour_parts;
     std::vector<View> names;
     for (size_t i = 0; i < count; ++i) {
-        for (auto [name, id] : shards[i].endpoints) names.push_back(name);
+        for (const auto& name : shards[i].endpoints.names()) names.push_back(name);
         for (auto& [hour, groups] : shards[i].by_hour) {
             auto& parts = hour_parts.try_emplace(hour, count, nullptr).first->second;
             parts[i] = &groups;
@@ -142,11 +191,13 @@ int main(int argc, char** argv) {
     std::sort(names.begin(), names.end());
     names.erase(std::unique(names.begin(), names.end()), names.end());
     std::vector<std::vector<int>> ids(count, std::vector<int>(names.size(), -1));
-    for (size_t i = 0; i < count; ++i)
-        for (size_t e = 0; e < names.size(); ++e) {
-            auto pos = shards[i].endpoints.find(names[e]);
-            if (pos != shards[i].endpoints.end()) ids[i][e] = pos->second;
+    for (size_t i = 0; i < count; ++i) {
+        size_t id = 0;
+        for (const auto& name : shards[i].endpoints.names()) {
+            auto e = std::lower_bound(names.begin(), names.end(), name) - names.begin();
+            ids[i][e] = id++;
         }
+    }
     std::vector<std::map<View, Hour>::iterator> hours;
     for (auto it = hour_parts.begin(); it != hour_parts.end(); ++it) hours.push_back(it);
     std::vector<std::string> rendered(hours.size());

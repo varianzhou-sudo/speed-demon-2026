@@ -21,3 +21,9 @@ The [organizer’s practice board](https://speeddemon.dev/board/) scored commit 
 ## First optimization pass
 
 Partition the memory-mapped log at complete line boundaries. Each worker interns observed endpoints and accumulates exact latency samples locally. Merge the buckets by hour and endpoint, sort the combined latency samples, and emit independent hourly buffers in key order. The candidate matched the full public output hash and the official Python oracle on three additional tiny datasets (seeds 47, 103 and 327).
+
+Run `run-057f7c74f4dc` on the organizer's full public input scored `6fd666fe2789` at **67.571535 practice points**. All gates passed. Wall time was 0.079430 s, peak memory 52,367,360 bytes, and the efficiency coefficient was 22.461084.
+
+## Second optimization pass
+
+The shard-local endpoint dictionary now uses open addressing with exact key comparisons. Small latency groups are sorted. Large groups are partitioned in ascending percentile order with `std::nth_element`. Two native paired full-data comparisons measured speedups of 1.36× and 1.54× over the preceding parallel version.

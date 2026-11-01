@@ -30,3 +30,9 @@ The [organizer’s practice board](https://speeddemon.dev/board/) scored commit 
 ## First optimization pass
 
 Read the CSV in blocks and carry incomplete records into the next block. Find field delimiters and escaped quotes in place. Intern names in a shared byte pool with exact comparisons on hash collisions. This preserves distinct-name counts across blocks and avoids allocating strings for every row. The candidate matched the full public output hash and the official Python oracle on three additional tiny datasets (seeds 47, 103 and 327).
+
+Run `run-927c9da7a5d6` on the organizer's full public input scored `6fd666fe2789` at **45.796127 practice points**. All gates passed. Wall time was 0.630364 s, peak memory 12,726,272 bytes, and the efficiency coefficient was 8.239911.
+
+## Second optimization pass
+
+Workers split the input at CRLF record boundaries and parse independent ranges. The input specification excludes carriage returns inside quoted fields, so embedded line feeds remain safe. Private numeric totals and shared per-country name flags avoid duplicate counts. Three full-input runs per version on the local host measured a median of 1.160 s for block parsing on a single thread and 0.314 s for parallel parsing. Native peak process RSS increased from 13,044 to 14,304 KiB.
