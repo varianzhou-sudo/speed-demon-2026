@@ -27,3 +27,5 @@ Run `run-057f7c74f4dc` on the organizer's full public input scored `6fd666fe2789
 ## Second optimization pass
 
 The shard-local endpoint dictionary now uses open addressing with exact key comparisons. Small latency groups are sorted. Large groups are partitioned in ascending percentile order with `std::nth_element`. Two native paired full-data comparisons measured speedups of 1.36× and 1.54× over the preceding parallel version.
+
+Run `run-c0f3c051a1d1` passed all public hardware gates for commit `f3c84c40962d`: 0.067389 s, 54,435,840 bytes, K 23.230853, 68.303258 practice points.

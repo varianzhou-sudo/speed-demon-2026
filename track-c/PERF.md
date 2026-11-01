@@ -36,3 +36,5 @@ Run `run-927c9da7a5d6` on the organizer's full public input scored `6fd666fe2789
 ## Second optimization pass
 
 Workers split the input at CRLF record boundaries and parse independent ranges. The input specification excludes carriage returns inside quoted fields, so embedded line feeds remain safe. Private numeric totals and shared per-country name flags avoid duplicate counts. Three full-input runs per version on the local host measured a median of 1.160 s for block parsing on a single thread and 0.314 s for parallel parsing. Native peak process RSS increased from 13,044 to 14,304 KiB.
+
+Run `run-0b3fb7f8854d` passed all public hardware gates for commit `f3c84c40962d`: 0.153261 s, 15,966,208 bytes, K 15.555835, 59.594666 practice points.
