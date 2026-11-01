@@ -1,6 +1,6 @@
 # Speed Demon 2026
 
-Team `varianzhou-sudo` is preparing entries for three tracks of the [Speed Demon 2026](https://speeddemon.dev/) performance competition.
+Team `Super-Tangram!!` is preparing entries for three tracks of the [Speed Demon 2026](https://speeddemon.dev/) performance competition.
 
 | Track | Task | Implementation |
 | --- | --- | --- |
